@@ -3,63 +3,56 @@ class Actor:
         self.__validate_actor_id(actor_id)
         self.__validate_fio(fio)
         self.__validate_staz(staz)
-
         self.__actor_id = actor_id
         self.__fio = fio
         self.__staz = staz
+        self.__zvan = self.__prepare_list(zvan, "звание")
+        self.__awards = self.__prepare_list(awards, "награда")
 
-        self.__zvan = self.__validate_and_prepare_list(zvan, "звание")
-        self.__awards = self.__validate_and_prepare_list(awards, "награда")
+    @staticmethod
+    def __validate(condition, error_message):
+        if not condition:
+            raise ValueError(error_message)
 
     @staticmethod
     def __validate_actor_id(actor_id):
-        if not isinstance(actor_id, int) or actor_id <= 0:
-            raise ValueError("ID актера должен быть положительным целым числом")
+        Actor.__validate(
+            isinstance(actor_id, int) and actor_id > 0,
+            "ID актера должен быть положительным целым числом"
+        )
 
     @staticmethod
     def __validate_fio(fio):
-        if not fio or not isinstance(fio, str):
-            raise ValueError("ФИО должно быть непустой строкой")
-        if len(fio.strip()) < 5:
-            raise ValueError("ФИО должно содержать не менее 5 символов")
-        if ' ' not in fio:
-            raise ValueError("ФИО должно содержать имя и фамилию через пробел")
+        Actor.__validate(
+            isinstance(fio, str) and fio.strip() and len(fio.strip()) >= 5 and ' ' in fio,
+            "ФИО должно быть непустой строкой не менее 5 символов с пробелом"
+        )
 
     @staticmethod
     def __validate_staz(staz):
-        if not isinstance(staz, (int, float)):
-            raise ValueError("Стаж должен быть числом")
-        if staz < 0:
-            raise ValueError("Стаж не может быть отрицательным")
-        if staz > 100:
-            raise ValueError("Стаж не может превышать 100 лет")
+        Actor.__validate(
+            isinstance(staz, (int, float)) and 0 <= staz <= 100,
+            "Стаж должен быть числом от 0 до 100 лет"
+        )
 
     @staticmethod
     def __validate_list_item(item, item_type):
-        if not isinstance(item, str):
-            raise ValueError(f"{item_type} должно быть строкой")
-        if not item.strip():
-            raise ValueError(f"{item_type} не может быть пустой строкой")
+        Actor.__validate(
+            isinstance(item, str) and item.strip(),
+            f"{item_type} должно быть непустой строкой"
+        )
         return item.strip()
 
     @staticmethod
-    def __validate_and_prepare_list(items, item_type):
+    def __prepare_list(items, item_type):
+        """Универсальная подготовка списка"""
         if items is None:
             return []
-
         if isinstance(items, str):
-            validated_item = Actor.__validate_list_item(items, item_type)
-            return [validated_item]
-
-        if not isinstance(items, list):
-            raise ValueError(f"{item_type} должны быть переданы как список или строка")
-
-        validated_items = []
-        for item in items:
-            validated_item = Actor.__validate_list_item(item, item_type)
-            validated_items.append(validated_item)
-
-        return validated_items
+            return [Actor.__validate_list_item(items, item_type)]
+        if isinstance(items, list):
+            return [Actor.__validate_list_item(item, item_type) for item in items]
+        raise ValueError(f"{item_type} должны быть списком или строкой")
 
     def get_actor_id(self):
         return self.__actor_id
@@ -84,29 +77,33 @@ class Actor:
         self.__validate_staz(value)
         self.__staz = value
 
+    def __manage_list_item(self, item, list_name, action, item_type):
+        if action == "add":
+            validated = self.__validate_list_item(item, item_type)
+            getattr(self, list_name).append(validated)
+        elif action == "remove" and item in getattr(self, list_name):
+            getattr(self, list_name).remove(item)
+
     def add_zvan(self, title):
-        validated_title = self.__validate_list_item(title, "звание")
-        self.__zvan.append(validated_title)
+        self.__manage_list_item(title, "_Actor__zvan", "add", "звание")
 
     def remove_zvan(self, title):
-        if title in self.__zvan:
-            self.__zvan.remove(title)
+        self.__manage_list_item(title, "_Actor__zvan", "remove", "звание")
 
     def add_award(self, award):
-        validated_award = self.__validate_list_item(award, "награда")
-        self.__awards.append(validated_award)
+        self.__manage_list_item(award, "_Actor__awards", "add", "награда")
 
     def remove_award(self, award):
-        if award in self.__awards:
-            self.__awards.remove(award)
+        self.__manage_list_item(award, "_Actor__awards", "remove", "награда")
 
     def __str__(self):
-        return f"ID актера: {self.__actor_id}, ФИО: {self.__fio}, Стаж: {self.__staz} лет, Звания: {self.__zvan}, Награды: {self.__awards}"
-
+        return f"ID: {self.__actor_id}, ФИО: {self.__fio}, Стаж: {self.__staz} лет, Звания: {self.__zvan}, Награды: {self.__awards}"
 
 try:
-    actor = Actor(1, "Круз Том Сергеевич", 20, ["Заслуженный артист РФ"], ["Оскар"])
+    actor = Actor(1, "Круз Том Сергеевич", 20, "Заслуженный артист РФ", ["Оскар"])
+    print(actor)
+    actor.add_zvan("")
+    actor.add_award("Золотой глобус")
     print(actor)
 except ValueError as e:
-    print(f"Ошибка создания объекта: {e}")
-
+    print(f"Ошибка: {e}")
