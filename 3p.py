@@ -45,13 +45,19 @@ class Actor:
 
     @staticmethod
     def __prepare_list(items, item_type):
-        """Универсальная подготовка списка"""
         if items is None:
             return []
         if isinstance(items, str):
+            if not items.strip():  
+                return []  
             return [Actor.__validate_list_item(items, item_type)]
         if isinstance(items, list):
-            return [Actor.__validate_list_item(item, item_type) for item in items]
+            validated_items = []
+            for item in items:
+                if isinstance(item, str) and item.strip():  
+                    validated_item = Actor.__validate_list_item(item, item_type)
+                    validated_items.append(validated_item)
+            return validated_items
         raise ValueError(f"{item_type} должны быть списком или строкой")
 
     def get_actor_id(self):
@@ -107,3 +113,4 @@ try:
     print(actor)
 except ValueError as e:
     print(f"Ошибка: {e}")
+
