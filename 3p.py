@@ -1,5 +1,6 @@
 import json
 
+
 class Actor:
     def __init__(self, actor_id, fio, staz, zvan=None, awards=None):
         self.__validate_actor_id(actor_id)
@@ -10,6 +11,19 @@ class Actor:
         self.__staz = staz
         self.__zvan = self.__prepare_list(zvan, "звание")
         self.__awards = self.__prepare_list(awards, "награда")
+
+    def short_str(self):
+        fam = self.__fio.split(' ')[0] 
+        return f"ID: {self.__actor_id}, Фамилия: {fam}, Стаж (лет): {self.__staz}"
+
+    def __eq__(self, other):
+        if not isinstance(other, Actor):
+            return False
+        return (self.__actor_id == other.__actor_id and
+                self.__fio == other.__fio and
+                self.__staz == other.__staz and
+                self.__zvan == other.__zvan and
+                self.__awards == other.__awards)
 
     @classmethod
     def from_json(cls, json_data):
@@ -143,7 +157,8 @@ class Actor:
 
 try:
     actor1 = Actor(1, "Круз Том Сергеевич", 20, "Заслуженный артист РФ", [""])
-    print(actor1)
+    print("Полная форма:", actor1)
+    print("Краткая форма:", actor1.short_str())
 
     json_data = {
         'ID': 2,
@@ -153,11 +168,17 @@ try:
         'Награды': ['Золотая пальмовая ветвь']
     }
     actor2 = Actor.from_json(json_data)
-    print(actor2)
+    print("Полная форма:",actor2)
+    print("Краткая форма:", actor2.short_str())
 
-    csv_str = "3, Кавилл Генри Леонидович,7,,Премия MTV;BAFTA"
+    print("actor1 == actor2?", actor1 == actor2)
+    csv_str = "3,Кавилл Генри Леонидович,7,,Премия MTV;BAFTA"
     actor3 = Actor.from_string(csv_str)
-    print(actor3)
+    print("Полная форма:",actor3)
+    print("Краткая форма:", actor3.short_str())
 
 except ValueError as e:
     print(f"Ошибка: {e}")
+
+
+
