@@ -1,3 +1,5 @@
+import json
+
 class Actor:
     def __init__(self, actor_id, fio, staz, zvan=None, awards=None):
         self.__validate_actor_id(actor_id)
@@ -8,6 +10,39 @@ class Actor:
         self.__staz = staz
         self.__zvan = self.__prepare_list(zvan, "звание")
         self.__awards = self.__prepare_list(awards, "награда")
+
+    @classmethod
+    def from_json(cls, json_data):
+        try:
+            return cls(
+                actor_id=json_data['ID'],
+                fio=json_data['ФИО'],
+                staz=json_data['Стаж'],
+                zvan=json_data.get('Звание', []),
+                awards=json_data.get('Награды', [])
+            )
+        except KeyError as e:
+            raise ValueError(f"Отсутствует обязательное поле в JSON: {e}")
+
+    @classmethod
+    def from_string(cls, csv_string):
+        try:
+            parts = csv_string.split(',')
+            if len(parts) < 3:
+                raise ValueError("Строка должна содержать минимум 3 поля: id,fio,staz")
+            actor_id = int(parts[0])
+            fio = parts[1]
+            staz = float(parts[2])
+            zvan = None
+            if len(parts) > 3 and parts[3]:
+                zvan = parts[3].split(';')
+            awards = None
+            if len(parts) > 4 and parts[4]:
+                awards = parts[4].split(';')
+            return cls(actor_id, fio, staz, zvan, awards)
+
+        except ValueError as e:
+            raise ValueError(f"Ошибка парсинга CSV строки: {e}")
 
     @staticmethod
     def __validate(condition, error_message):
@@ -48,13 +83,13 @@ class Actor:
         if items is None:
             return []
         if isinstance(items, str):
-            if not items.strip():  
-                return []  
+            if not items.strip():
+                return []
             return [Actor.__validate_list_item(items, item_type)]
         if isinstance(items, list):
             validated_items = []
             for item in items:
-                if isinstance(item, str) and item.strip():  
+                if isinstance(item, str) and item.strip():
                     validated_item = Actor.__validate_list_item(item, item_type)
                     validated_items.append(validated_item)
             return validated_items
@@ -103,14 +138,26 @@ class Actor:
         self.__manage_list_item(award, "_Actor__awards", "remove", "награда")
 
     def __str__(self):
-        return f"ID: {self.__actor_id}, ФИО: {self.__fio}, Стаж: {self.__staz} лет, Звания: {self.__zvan}, Награды: {self.__awards}"
+        return f"ID: {self.__actor_id}, ФИО: {self.__fio}, Стаж (лет): {self.__staz} , Звания: {self.__zvan}, Награды: {self.__awards}"
+
 
 try:
-    actor = Actor(1, "Круз Том Сергеевич", 20, "Заслуженный артист РФ", ["Оскар"])
-    print(actor)
-    actor.add_zvan("")
-    actor.add_award("Золотой глобус")
-    print(actor)
+    actor1 = Actor(1, "Круз Том Сергеевич", 20, "Заслуженный артист РФ", [""])
+    print(actor1)
+
+    json_data = {
+        'ID': 2,
+        'ФИО': 'Фокс Меган Александровна',
+        'Стаж': 15,
+        'Звание': [''],
+        'Награды': ['Золотая пальмовая ветвь']
+    }
+    actor2 = Actor.from_json(json_data)
+    print(actor2)
+
+    csv_str = "3, Кавилл Генри Леонидович,7,,Премия MTV;BAFTA"
+    actor3 = Actor.from_string(csv_str)
+    print(actor3)
+
 except ValueError as e:
     print(f"Ошибка: {e}")
-
