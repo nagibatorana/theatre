@@ -1,8 +1,11 @@
 import json
+
 class ActorShort:
+
     def __init__(self, actor_id, fam, staz):
         self.__validate_actor_id(actor_id)
         self.__actor_id = actor_id
+        self.__validate_staz(staz)
         self.__fam = fam
         self.__staz = staz
 
@@ -17,6 +20,13 @@ class ActorShort:
     def __validate_actor_id(actor_id):
         if not isinstance(actor_id, int) or actor_id <= 0:
             raise ValueError("ID актера должен быть положительным целым числом")
+
+    @staticmethod
+    def __validate_staz(staz):
+        if not isinstance(staz, (int, float)) or staz < 0:
+            raise ValueError("Стаж должен быть неотрицательным числом")
+        if staz > 100:
+            raise ValueError("Стаж не может превышать 100 лет")
 
     def get_actor_id(self):
         return self.__actor_id
@@ -40,6 +50,7 @@ class ActorShort:
 
 
 class Actor(ActorShort):
+
     def __init__(self, short_actor, fio, zvan=None, awards=None):
         super().__init__(short_actor.get_actor_id(), short_actor.get_fam(), short_actor.get_staz())
         self.__validate_fio(fio)
@@ -105,27 +116,33 @@ class Actor(ActorShort):
             raise ValueError(f"Отсутствует обязательное поле в JSON: {e}")
 
     @classmethod
-    def from_string(cls, csv_string):
-        try:
-            parts = csv_string.split(',')
-            if len(parts) < 3:
-                raise ValueError("Строка должна содержать минимум 3 поля: id,fio,staz")
+    def from_string(cls, string_data):
+        if string_data.strip().startswith('{'):
+            try:
+                json_data = json.loads(string_data)
+                return cls.from_json(json_data)
+            except json.JSONDecodeError:
+                raise ValueError("Некорректный JSON формат")
+        else:
+            try:
+                parts = string_data.split(',')
+                if len(parts) < 3:
+                    raise ValueError("Строка должна содержать минимум 3 поля: ID, ФИО, Стаж")
 
-            actor_id = int(parts[0])
-            fio = parts[1].strip()
-            staz = float(parts[2])
+                actor_id = int(parts[0])
+                fio = parts[1].strip()
+                staz = float(parts[2])
+                short_actor = ActorShort(actor_id, cls.__only_fam(fio), staz)
+                zvan = None
+                if len(parts) > 3 and parts[3].strip():
+                    zvan = parts[3].split(';')
+                awards = None
+                if len(parts) > 4 and parts[4].strip():
+                    awards = parts[4].split(';')
+                return cls(short_actor, fio, zvan, awards)
 
-            short_actor = ActorShort(actor_id, cls.__only_fam(fio), staz)
-            zvan = None
-            if len(parts) > 3 and parts[3].strip():
-                zvan = parts[3].split(';')
-            awards = None
-            if len(parts) > 4 and parts[4].strip():
-                awards = parts[4].split(';')
-            return cls(short_actor, fio, zvan, awards)
-
-        except ValueError as e:
-            raise ValueError(f"Ошибка парсинга CSV строки: {e}")
+            except ValueError as e:
+                raise ValueError(f"Ошибка парсинга CSV строки: {e}")
 
     @staticmethod
     def __only_fam(fio):
@@ -176,24 +193,24 @@ try:
     full_actor1 = short_actor1.to_full("Круз Том Сергеевич",["Заслуженный артист РФ"],["Оскар"])
     print(full_actor1)
 
-    json_data = {
-        'ID': 2,
-        'ФИО': 'Фокс Меган Александровна',
-        'Стаж': 15,
-        'Звание': ['Заслуженная артистка'],
-        'Награды': ['Золотая пальмовая ветвь']
-    }
-    actor2 = Actor.from_json(json_data)
+    json_data = (
+        '{"ID": 2,'
+        '"ФИО": "Фокс Меган Александровна",'
+        '"Стаж": 15,'
+        '"Звание": ["Заслуженная артистка"],'
+        '"Награды": ["Золотая пальмовая ветвь"]}'
+    )
+    actor2 = Actor.from_string(json_data)
     print(actor2)
 
-    csv_str = "3,Кавилл Генри Леонидович,7,Заслуженный артист,Премия MTV;BAFTA"
+    csv_str = "3,Кавилл Генри Леонидович,7, ,Премия MTV;BAFTA"
     actor3 = Actor.from_string(csv_str)
     print(actor3)
 
     print("full_actor является ActorShort?", isinstance(full_actor1, ActorShort))
     print("full_actor является Actor?", isinstance(full_actor1, Actor))
     print("short_actor является Actor?", isinstance(short_actor1, Actor))
-    print("actor1 == actor2?", full_actor1 == actor2)
+    print("actor1 == actor2?", short_actor1 == actor2)
 
 except ValueError as e:
     print(f"Ошибка: {e}")
