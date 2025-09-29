@@ -2,12 +2,29 @@ import json
 
 class ActorShort:
 
-    def __init__(self, actor_id, fam, staz):
+    def __init__(self, actor_id, fam=None, staz=None):
+        if isinstance(actor_id,str) and actor_id.strip().startswith('{'):
+            data = self.__parse__json_string(actor_id)
+            actor_id=data['ID']
+            fam=data['Фамилия']
+            staz=data['Стаж']
+
         self.__validate_actor_id(actor_id)
         self.__actor_id = actor_id
         self.__validate_staz(staz)
         self.__fam = fam
         self.__staz = staz
+
+    def __parse__json_string(selfself,json_string):
+        try:
+            data = json.loads(json_string)
+            required_fields=['ID','Фамилия','Стаж']
+            for field in required_fields:
+                if field not in data:
+                    raise ValueError("Отсутствуют необходимые поля")
+            return data
+        except json.JSONDecodeError:
+            raise ValueError("Некорректный JSON формат")
 
     def __eq__(self, other):
         if not isinstance(other, ActorShort):
@@ -206,6 +223,10 @@ try:
     csv_str = "3,Кавилл Генри Леонидович,7, ,Премия MTV;BAFTA"
     actor3 = Actor.from_string(csv_str)
     print(actor3)
+
+    js_dat = '{"ID": 4, "Фамилия": "Питт", "Стаж": 15}'
+    actor4 = ActorShort(js_dat)
+    print(actor4)
 
     print("full_actor является ActorShort?", isinstance(full_actor1, ActorShort))
     print("full_actor является Actor?", isinstance(full_actor1, Actor))
