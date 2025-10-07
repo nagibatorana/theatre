@@ -1,7 +1,9 @@
 import json
+import yaml
+import os
 
-class Actor_rep_json:
-    def __init__(self, filename = "actors.json"):
+class Actor_rep_yaml:
+    def __init__(self, filename="actors.yaml"):
         self.filename = filename
         self.data = []
         self._load_data()
@@ -9,15 +11,15 @@ class Actor_rep_json:
     def _load_data(self):
         try:
             with open(self.filename, 'r', encoding='utf-8') as f:
-                self.data = json.load(f)
+                self.data = yaml.safe_load(f) or []
         except FileNotFoundError:
             self.data = []
-        except json.JSONDecodeError:
+        except yaml.YAMLError:
             self.data = []
 
     def save_data(self):
         with open(self.filename, 'w', encoding='utf-8') as f:
-            json.dump(self.data, f, ensure_ascii=False)
+            yaml.dump(self.data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
     def get_by_id(self, actor_id):
         for actor in self.data:
@@ -28,6 +30,7 @@ class Actor_rep_json:
     def get_k_n_short_list(self, k, n):
         start_index = (n - 1) * k
         end_index = start_index + k
+
         short_list = []
         for actor in self.data[start_index:end_index]:
             short_actor = {
@@ -42,8 +45,10 @@ class Actor_rep_json:
     def sort_by_field(self, field, reverse=False):
         if not self.data:
             return
+
         if field not in self.data[0]:
             raise ValueError(f"Поле {field} не существует в данных")
+
         self.data.sort(key=lambda x: x.get(field, ''), reverse=reverse)
         self.save_data()
 
@@ -52,6 +57,7 @@ class Actor_rep_json:
             new_id = max(actor.get('ID', 0) for actor in self.data) + 1
         else:
             new_id = 1
+
         actor_data['ID'] = new_id
         self.data.append(actor_data)
         self.save_data()
@@ -306,71 +312,82 @@ class Actor(ActorShort):
         return f"ID: {self.get_actor_id()}, ФИО: {self.__fio}, Стаж (лет): {self.get_staz()}, Звания: {self.__zvan}, Награды: {self.__awards}"
 
 
-try:
-    test_data = [
-        {
-            "ID": 1,
-            "Фамилия": "Круз",
-            "Стаж": 20,
-            "ФИО": "Круз Том Сергеевич",
-            "Звание": ["Заслуженный артист РФ"],
-            "Награды": ["Оскар"]
-        },
-        {
-            "ID": 2,
-            "Фамилия": "Фокс",
-            "Стаж": 15,
-            "ФИО": "Фокс Меган Александровна",
-            "Звание": ["Заслуженная артистка"],
-            "Награды": ["Золотая пальмовая ветвь"]
-        },
-        {
-            "ID": 3,
-            "Фамилия": "Кавилл",
-            "Стаж": 7,
-            "ФИО": "Кавилл Генри Леонидович",
-            "Звание": ["Заслуженный артист"],
-            "Награды": ["Премия MTV", "BAFTA"]
+if __name__ == "__main__":
+    try:
+        test_data = [
+            {
+                "ID": 1,
+                "Фамилия": "Круз",
+                "Стаж": 20,
+                "ФИО": "Круз Том Сергеевич",
+                "Звание": ["Заслуженный артист РФ"],
+                "Награды": ["Оскар"]
+            },
+            {
+                "ID": 2,
+                "Фамилия": "Фокс",
+                "Стаж": 15,
+                "ФИО": "Фокс Меган Александровна",
+                "Звание": ["Заслуженная артистка"],
+                "Награды": ["Золотая пальмовая ветвь"]
+            },
+            {
+                "ID": 3,
+                "Фамилия": "Камил",
+                "Стаж": 7,
+                "ФИО": "Кавилл Генри Леонидович",
+                "Звание": ["Заслуженный артист"],
+                "Награды": ["Премия MTV", "BAFTA"]
+            }
+        ]
+
+        with open('actors.yaml', 'w', encoding='utf-8') as f:
+            yaml.dump(test_data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+        repo = Actor_rep_yaml("actors.yaml")
+        actor_2 = repo.get_by_id(2)
+        print(f"c. Актер с ID=2: {actor_2}")
+
+        short_actors = repo.get_k_n_short_list(2, 1)
+        print(f"d. Первые 2 кратких актера: {short_actors}")
+
+        print(f"e. Сортировка по стажу:")
+        repo.sort_by_field("Стаж")
+        for actor in repo.data:
+            print(f" ID {actor['ID']}: {actor['Фамилия']} - {actor['Стаж']} лет")
+
+        print(f"f. Добавление нового актера:")
+        new_actor = {
+            "Фамилия": "Питт",
+            "Стаж": 25,
+            "ФИО": "Питт Брэд Олегович",
+            "Звание": ["Народный артист"],
+            "Награды": ["Оскар", "Золотой глобус"]
         }
-    ]
+        new_id = repo.add_actor(new_actor)
+        print(f"Добавлен актер с ID: {new_id}")
 
-    with open('actors.json', 'w', encoding='utf-8') as f:
-        json.dump(test_data, f, ensure_ascii=False, indent=2)
+        print(f"g. Обновление актера с ID=1:")
+        updated_actor = {
+            "Фамилия": "Круз",
+            "Стаж": 21,
+            "ФИО": "Круз Том Сергеевич",
+            "Звание": ["Заслуженный артист РФ", "Народный артист"],
+            "Награды": ["Оскар", "Золотой глобус"]
+        }
+        if repo.update_actor(1, updated_actor):
+            print("Актер успешно обновлен")
 
-    repo = Actor_rep_json("actors.json")
+        print(f"h. Удаление актера с ID=3:")
+        if repo.delete_actor(3):
+            print("Актер успешно удален")
 
-    print(f"c. Актер с ID=2: {repo.get_by_id(2)}")
-    print(f"d. Первые 2 кратких актера: {repo.get_k_n_short_list(2, 1)}")
-    print(f"e. Сортировка по стажу:")
-    repo.sort_by_field("Стаж")
-    for actor in repo.data:
-        print(f" ID {actor['ID']}: {actor['Фамилия']} - {actor['Стаж']} лет")
-    print(f"f. Добавление нового актера:")
-    new_actor = {
-        "Фамилия": "Питт",
-        "Стаж": 25,
-        "ФИО": "Питт Брэд Уильям",
-        "Звание": ["Народный артист"],
-        "Награды": ["Оскар", "Золотой глобус"]
-    }
-    new_id = repo.add_actor(new_actor)
-    print(f"Добавлен актер с ID: {new_id}")
-    print(f"g. Изменение актера с ID=1:")
-    updated_actor = {
-        "Фамилия": "Круз",
-        "Стаж": 21,
-        "ФИО": "Круз Том Сергеевич",
-        "Звание": ["Заслуженный артист РФ", "Народный артист"],
-        "Награды": ["Оскар", "Золотой глобус"]
-    }
-    if repo.update_actor(1, updated_actor):
-        print("Актер изменен")
-    print(f"h. Удаление актера с ID=3:")
-    if repo.delete_actor(3):
-        print("Актер удален")
-    print(f"i. Общее количество актеров: {repo.get_count()}")
-    for actor in repo.data:
-        print(f" ID {actor['ID']}: {actor['Фамилия']} - {actor['Стаж']} лет")
+        print(f"i. Общее количество актеров: {repo.get_count()}")
 
-except ValueError as e:
-    print(f"Ошибка: {e}")
+        print(f"Содержимое YAML файла:")
+        with open('actors.yaml', 'r', encoding='utf-8') as f:
+            content = f.read()
+            print(content)
+
+    except ValueError as e:
+        print(f"Ошибка: {e}")
