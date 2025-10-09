@@ -1,9 +1,8 @@
 import json
 import yaml
-import os
 
-class Actor_rep_yaml:
-    def __init__(self, filename="actors.yaml"):
+class Actor_rep_json:
+    def __init__(self, filename="actors.json"):
         self.filename = filename
         self.data = []
         self._load_data()
@@ -11,15 +10,13 @@ class Actor_rep_yaml:
     def _load_data(self):
         try:
             with open(self.filename, 'r', encoding='utf-8') as f:
-                self.data = yaml.safe_load(f) or []
-        except FileNotFoundError:
-            self.data = []
-        except yaml.YAMLError:
+                self.data = json.load(f) or []
+        except (FileNotFoundError, json.JSONDecodeError):
             self.data = []
 
     def save_data(self):
         with open(self.filename, 'w', encoding='utf-8') as f:
-            yaml.dump(self.data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            json.dump(self.data, f, ensure_ascii=False, indent=2)
 
     def get_by_id(self, actor_id):
         for actor in self.data:
@@ -39,7 +36,6 @@ class Actor_rep_yaml:
                 'Стаж': actor.get('Стаж')
             }
             short_list.append(short_actor)
-
         return short_list
 
     def sort_by_field(self, field, reverse=False):
@@ -83,6 +79,22 @@ class Actor_rep_yaml:
     def get_count(self):
         return len(self.data)
 
+
+class Actor_rep_yaml(Actor_rep_json):
+    def __init__(self, filename="actors.yaml"):
+        super().__init__(filename)
+
+    def _load_data(self):
+        try:
+            with open(self.filename, 'r', encoding='utf-8') as f:
+                self.data = yaml.safe_load(f) or []
+        except (FileNotFoundError, yaml.YAMLError):
+            self.data = []
+
+    def save_data(self):
+        with open(self.filename, 'w', encoding='utf-8') as f:
+            yaml.dump(self.data, f, allow_unicode=True,
+                      default_flow_style=False, sort_keys=False)
 
 class ActorShort:
     def __init__(self, actor_id, fam=None, staz=None):
@@ -311,7 +323,6 @@ class Actor(ActorShort):
     def __str__(self):
         return f"ID: {self.get_actor_id()}, ФИО: {self.__fio}, Стаж (лет): {self.get_staz()}, Звания: {self.__zvan}, Награды: {self.__awards}"
 
-
 if __name__ == "__main__":
     try:
         test_data = [
@@ -330,33 +341,16 @@ if __name__ == "__main__":
                 "ФИО": "Фокс Меган Александровна",
                 "Звание": ["Заслуженная артистка"],
                 "Награды": ["Золотая пальмовая ветвь"]
-            },
-            {
-                "ID": 3,
-                "Фамилия": "Камил",
-                "Стаж": 7,
-                "ФИО": "Кавилл Генри Леонидович",
-                "Звание": ["Заслуженный артист"],
-                "Награды": ["Премия MTV", "BAFTA"]
             }
         ]
 
-        with open('actors.yaml', 'w', encoding='utf-8') as f:
-            yaml.dump(test_data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        json_repo = Actor_rep_json("actors.json")
+        yaml_repo = Actor_rep_yaml("actors.yaml")
+        json_repo.data = test_data.copy()
+        json_repo.save_data()
+        yaml_repo.data = test_data.copy()
+        yaml_repo.save_data()
 
-        repo = Actor_rep_yaml("actors.yaml")
-        actor_2 = repo.get_by_id(2)
-        print(f"c. Актер с ID=2: {actor_2}")
-
-        short_actors = repo.get_k_n_short_list(2, 1)
-        print(f"d. Первые 2 кратких актера: {short_actors}")
-
-        print(f"e. Сортировка по стажу:")
-        repo.sort_by_field("Стаж")
-        for actor in repo.data:
-            print(f" ID {actor['ID']}: {actor['Фамилия']} - {actor['Стаж']} лет")
-
-        print(f"f. Добавление нового актера:")
         new_actor = {
             "Фамилия": "Питт",
             "Стаж": 25,
@@ -364,30 +358,16 @@ if __name__ == "__main__":
             "Звание": ["Народный артист"],
             "Награды": ["Оскар", "Золотой глобус"]
         }
-        new_id = repo.add_actor(new_actor)
-        print(f"Добавлен актер с ID: {new_id}")
+        new_id_json = json_repo.add_actor(new_actor)
+        new_id_yaml = yaml_repo.add_actor(new_actor)
 
-        print(f"g. Обновление актера с ID=1:")
-        updated_actor = {
-            "Фамилия": "Круз",
-            "Стаж": 21,
-            "ФИО": "Круз Том Сергеевич",
-            "Звание": ["Заслуженный артист РФ", "Народный артист"],
-            "Награды": ["Оскар", "Золотой глобус"]
-        }
-        if repo.update_actor(1, updated_actor):
-            print("Актер успешно обновлен")
+        print("JSON файл:")
+        with open('actors.json', 'r', encoding='utf-8') as f:
+            print(f.read())
 
-        print(f"h. Удаление актера с ID=3:")
-        if repo.delete_actor(3):
-            print("Актер успешно удален")
-
-        print(f"i. Общее количество актеров: {repo.get_count()}")
-
-        print(f"Содержимое YAML файла:")
+        print("YAML файл:")
         with open('actors.yaml', 'r', encoding='utf-8') as f:
-            content = f.read()
-            print(content)
+            print(f.read())
 
     except ValueError as e:
         print(f"Ошибка: {e}")
