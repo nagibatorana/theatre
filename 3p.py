@@ -2,7 +2,7 @@ import psycopg2
 import json
 import yaml
 from abc import ABC, abstractmethod
-
+from functools import wraps
 
 class Delegat:
     _instance = None
@@ -186,31 +186,155 @@ class Actor_rep_yaml(Actor_rep_json):
                       default_flow_style=False, sort_keys=False)
 
 
+def apply_filters_and_sort(original_method):
+
+    @wraps(original_method)
+    def wrapper(self, *args, **kwargs):
+
+        filters = kwargs.pop('filters', {})
+        sort_by = kwargs.pop('sort_by', None)
+        sort_order = kwargs.pop('sort_order', 'ASC')
+
+        result = original_method(self, *args, **kwargs)
+
+        if filters and result:
+            result = self._apply_filters(result, filters)
+
+        if sort_by and result:
+            result = self._apply_sorting(result, sort_by, sort_order)
+
+        return result
+
+    return wrapper
+
+
+def count_with_filters(original_method):
+
+    @wraps(original_method)
+    def wrapper(self, *args, **kwargs):
+        filters = kwargs.pop('filters', {})
+
+        if filters:
+            return self._get_count_with_filters(filters)
+        else:
+            return original_method(self, *args, **kwargs)
+
+    return wrapper
 
 class Actor_rep_DB(ActorRep):
     def __init__(self, db_config=None):
         self.db = Delegat(db_config)
 
+    def _apply_filters(self, data, filters):
+        filtered_data = []
+        for item in data:
+            match = True
+            for field, condition in filters.items():
+                if field in item:
+                    if isinstance(condition, dict):
+                        for op, value in condition.items():
+                            if op == 'min' and item[field] < value:
+                                match = False
+                            elif op == 'max' and item[field] > value:
+                                match = False
+                            elif op == 'contains' and value not in str(item[field]):
+                                match = False
+                            elif op == 'equals' and item[field] != value:
+                                match = False
+                    else:
+                        if item[field] != condition:
+                            match = False
+                else:
+                    match = False
+
+                if not match:
+                    break
+
+            if match:
+                filtered_data.append(item)
+
+        return filtered_data
+
+    def _apply_sorting(self, data, sort_by, sort_order='ASC'):
+
+        if not data or sort_by not in data[0]:
+            return data
+
+        reverse = (sort_order.upper() == 'DESC')
+        return sorted(data, key=lambda x: x.get(sort_by, ''), reverse=reverse)
+
+    def _get_count_with_filters(self, filters):
+
+        where_conditions = []
+        params = []
+
+        field_mapping = {
+            'Стаж': 'staz',
+            'Фамилия': 'fam',
+            'ID': 'id',
+            'ФИО': 'fio'
+        }
+
+        for field, condition in filters.items():
+            db_field = field_mapping.get(field, field)
+
+            if isinstance(condition, dict):
+                for op, value in condition.items():
+                    if op == 'min':
+                        where_conditions.append(f"{db_field} >= %s")
+                        params.append(value)
+                    elif op == 'max':
+                        where_conditions.append(f"{db_field} <= %s")
+                        params.append(value)
+                    elif op == 'contains':
+                        where_conditions.append(f"{db_field} LIKE %s")
+                        params.append(f"%{value}%")
+                    elif op == 'equals':
+                        where_conditions.append(f"{db_field} = %s")
+                        params.append(value)
+            else:
+                where_conditions.append(f"{db_field} = %s")
+                params.append(condition)
+
+        where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
+        query = f"SELECT COUNT(*) FROM actors WHERE {where_clause}"
+
+        result = self.db.execute_query(query, params)
+        return result[0][0] if result else 0
+
     def get_by_id(self, actor_id):
+
         query = "SELECT id, fam, staz, fio, zvan, awards FROM actors WHERE id = %s"
         result = self.db.execute_query(query, (actor_id,))
 
         if result and len(result) > 0:
             row = result[0]
             return {
-                'ID': row[0], 'Фамилия': row[1], 'Стаж': row[2],
-                'ФИО': row[3], 'Звание': row[4] or [], 'Награды': row[5] or []
+                'ID': row[0],
+                'Фамилия': row[1],
+                'Стаж': row[2],
+                'ФИО': row[3],
+                'Звание': row[4] or [],
+                'Награды': row[5] or []
             }
         return None
 
-    def get_k_n_short_list(self, k, n):
+    @apply_filters_and_sort
+    def get_k_n_short_list(self, k, n, **kwargs):
+
         offset = (n - 1) * k
+
         query = "SELECT id, fam, staz FROM actors ORDER BY id LIMIT %s OFFSET %s"
         result = self.db.execute_query(query, (k, offset))
+
         short_list = []
         if result:
             for row in result:
-                short_actor = {'ID': row[0], 'Фамилия': row[1], 'Стаж': row[2]}
+                short_actor = {
+                    'ID': row[0],
+                    'Фамилия': row[1],
+                    'Стаж': row[2]
+                }
                 short_list.append(short_actor)
         return short_list
 
@@ -220,8 +344,11 @@ class Actor_rep_DB(ActorRep):
         VALUES (%s, %s, %s, %s, %s) RETURNING id
         """
         new_id = self.db.execute_insert_returning(query, (
-            actor_data['Фамилия'], actor_data['Стаж'], actor_data['ФИО'],
-            actor_data.get('Звание', []), actor_data.get('Награды', [])
+            actor_data['Фамилия'],
+            actor_data['Стаж'],
+            actor_data['ФИО'],
+            actor_data.get('Звание', []),
+            actor_data.get('Награды', [])
         ))
         return new_id
 
@@ -231,35 +358,42 @@ class Actor_rep_DB(ActorRep):
         WHERE id = %s
         """
         rows_affected = self.db.execute_command(query, (
-            new_data['Фамилия'], new_data['Стаж'], new_data['ФИО'],
-            new_data.get('Звание', []), new_data.get('Награды', []), actor_id
+            new_data['Фамилия'],
+            new_data['Стаж'],
+            new_data['ФИО'],
+            new_data.get('Звание', []),
+            new_data.get('Награды', []),
+            actor_id
         ))
         return rows_affected > 0
 
     def delete_actor(self, actor_id):
+
         query = "DELETE FROM actors WHERE id = %s"
         rows_affected = self.db.execute_command(query, (actor_id,))
         return rows_affected > 0
 
-    def get_count(self):
+    @count_with_filters
+    def get_count(self, **kwargs):
+
         query = "SELECT COUNT(*) FROM actors"
         result = self.db.execute_query(query)
         return result[0][0] if result else 0
 
     def close_connection(self):
+
         self.db.close_connection()
 
 
 class Adapter(ActorRep):
-
     def __init__(self, db_repo):
         self._db_repo = db_repo
 
     def get_by_id(self, actor_id):
         return self._db_repo.get_by_id(actor_id)
 
-    def get_k_n_short_list(self, k, n):
-        return self._db_repo.get_k_n_short_list(k, n)
+    def get_k_n_short_list(self, k, n, **kwargs):
+        return self._db_repo.get_k_n_short_list(k, n, **kwargs)
 
     def add_actor(self, actor_data):
         return self._db_repo.add_actor(actor_data)
@@ -270,8 +404,8 @@ class Adapter(ActorRep):
     def delete_actor(self, actor_id):
         return self._db_repo.delete_actor(actor_id)
 
-    def get_count(self):
-        return self._db_repo.get_count()
+    def get_count(self, **kwargs):
+        return self._db_repo.get_count(**kwargs)
 
     def close_connection(self):
         return self._db_repo.close_connection()
@@ -512,32 +646,16 @@ if __name__ == "__main__":
         'port': 5432
     }
 
-    json_repo = Actor_rep_json("test_actors.json")
-    yaml_repo = Actor_rep_yaml("test_actors.yaml")
     db_repo = Actor_rep_DB(db_config)
+    total_count = db_repo.get_count()
+    experienced_count = db_repo.get_count(filters={'Стаж': {'min': 20}})
+    print(f"Всего актеров: {total_count}")
+    print(f"Актеров с опытом >= 20 лет: {experienced_count}")
+
+    print("Через адаптер (с фильтрацией):")
     adapted_repo = Adapter(db_repo)
+    actors = adapted_repo.get_k_n_short_list(10, 1, filters={'Стаж': {'min': 18}})
+    for actor in actors:
+        print(f" - {actor['Фамилия']} (стаж: {actor['Стаж']} лет)")
 
-    test_actor = {
-        'Фамилия': 'Круз',
-        'Стаж': 20,
-        'ФИО': 'Круз Том Сергеевич',
-        'Звание': ['Заслуженный артист РФ'],
-        'Награды': ['Оскар', 'Золотой глобус']
-    }
-
-    json_id = json_repo.add_actor(test_actor.copy())
-    yaml_id = yaml_repo.add_actor(test_actor.copy())
-    db_id = adapted_repo.add_actor(test_actor.copy())
-
-
-    repositories = [
-        ("JSON репозиторий", json_repo, json_id),
-        ("YAML репозиторий", yaml_repo, yaml_id),
-        ("БД через адаптер", adapted_repo, db_id)
-    ]
-
-    for repo_name, repo, actor_id in repositories:
-        actor = repo.get_by_id(actor_id)
-        print(f"{repo_name}: {actor}")
-
-    adapted_repo.close_connection()
+    db_repo.close_connection()
