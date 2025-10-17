@@ -1,11 +1,12 @@
-import psycopg2
 import json
-import yaml
 from abc import ABC, abstractmethod
 from functools import wraps
 
-def filterable(original_method):
+import psycopg2
+import yaml
 
+
+def filterable(original_method):
     @wraps(original_method)
     def wrapper(self, *args, **kwargs):
         filters = kwargs.pop('filters', {})
@@ -16,23 +17,19 @@ def filterable(original_method):
             result = self._apply_filters(result, filters)
         if sort_by and result:
             result = self._apply_sorting(result, sort_by, sort_order)
-
         return result
-
     return wrapper
 
-def countable(original_method):
 
+def countable(original_method):
     @wraps(original_method)
     def wrapper(self, *args, **kwargs):
         filters = kwargs.pop('filters', {})
-
         if filters:
             return self._get_count_with_filters(filters)
-        else:
-            return original_method(self, *args, **kwargs)
-
+        return original_method(self, *args, **kwargs)
     return wrapper
+
 
 class Delegat:
     _instance = None
@@ -52,14 +49,14 @@ class Delegat:
     def _create_connection(self):
         try:
             self._connection = psycopg2.connect(**self.db_config)
-        except Exception as e:
+        except psycopg2.Error as e:
             print(f"Ошибка подключения к БД: {e}")
             self._connection = None
 
     def execute_query(self, query, params=None):
         try:
             if not self._connection:
-                raise Exception("Нет подключения к БД")
+                raise ConnectionError("Нет подключения к БД")
             with self._connection.cursor() as cursor:
                 cursor.execute(query, params or ())
                 return cursor.fetchall()
@@ -70,8 +67,7 @@ class Delegat:
     def execute_command(self, query, params=None):
         try:
             if not self._connection:
-                raise Exception("Нет подключения к БД")
-
+                raise ConnectionError("Нет подключения к БД")
             with self._connection.cursor() as cursor:
                 cursor.execute(query, params or ())
                 self._connection.commit()
@@ -99,7 +95,6 @@ class Delegat:
 
 
 class ActorRep(ABC):
-
     @abstractmethod
     def get_by_id(self, actor_id):
         pass
@@ -125,7 +120,7 @@ class ActorRep(ABC):
         pass
 
 
-class Actor_rep_json(ActorRep):
+class ActorRepJson(ActorRep):
     def __init__(self, filename="actors.json"):
         self.filename = filename
         self.data = []
@@ -133,14 +128,14 @@ class Actor_rep_json(ActorRep):
 
     def _load_data(self):
         try:
-            with open(self.filename, 'r', encoding='utf-8') as f:
-                self.data = json.load(f) or []
+            with open(self.filename, 'r', encoding='utf-8') as file:
+                self.data = json.load(file) or []
         except (FileNotFoundError, json.JSONDecodeError):
             self.data = []
 
     def save_data(self):
-        with open(self.filename, 'w', encoding='utf-8') as f:
-            json.dump(self.data, f, ensure_ascii=False, indent=2)
+        with open(self.filename, 'w', encoding='utf-8') as file:
+            json.dump(self.data, file, ensure_ascii=False, indent=2)
 
     def _apply_filters(self, data, filters):
         filtered_data = []
@@ -163,10 +158,8 @@ class Actor_rep_json(ActorRep):
                             match = False
                 else:
                     match = False
-
                 if not match:
                     break
-
             if match:
                 filtered_data.append(item)
         return filtered_data
@@ -174,8 +167,7 @@ class Actor_rep_json(ActorRep):
     def _apply_sorting(self, data, sort_by, sort_order='ASC'):
         if not data or sort_by not in data[0]:
             return data
-
-        reverse = (sort_order.upper() == 'DESC')
+        reverse = sort_order.upper() == 'DESC'
         return sorted(data, key=lambda x: x.get(sort_by, ''), reverse=reverse)
 
     def _get_count_with_filters(self, filters):
@@ -183,22 +175,21 @@ class Actor_rep_json(ActorRep):
         return len(filtered_data)
 
     def get_by_id(self, actor_id):
-        for actor in self.data:
-            if actor.get('ID') == actor_id:
-                return actor
+        for actor_data in self.data:
+            if actor_data.get('ID') == actor_id:
+                return actor_data
         return None
 
     @filterable
     def get_k_n_short_list(self, k, n, **kwargs):
         start_index = (n - 1) * k
         end_index = start_index + k
-
         short_list = []
-        for actor in self.data[start_index:end_index]:
+        for actor_data in self.data[start_index:end_index]:
             short_actor = {
-                'ID': actor.get('ID'),
-                'Фамилия': actor.get('Фамилия'),
-                'Стаж': actor.get('Стаж')
+                'ID': actor_data.get('ID'),
+                'Фамилия': actor_data.get('Фамилия'),
+                'Стаж': actor_data.get('Стаж')
             }
             short_list.append(short_actor)
         return short_list
@@ -208,15 +199,14 @@ class Actor_rep_json(ActorRep):
             new_id = max(actor.get('ID', 0) for actor in self.data) + 1
         else:
             new_id = 1
-
         actor_data['ID'] = new_id
         self.data.append(actor_data)
         self.save_data()
         return new_id
 
     def update_actor(self, actor_id, new_data):
-        for i, actor in enumerate(self.data):
-            if actor.get('ID') == actor_id:
+        for i, actor_data in enumerate(self.data):
+            if actor_data.get('ID') == actor_id:
                 new_data['ID'] = actor_id
                 self.data[i] = new_data
                 self.save_data()
@@ -224,8 +214,8 @@ class Actor_rep_json(ActorRep):
         return False
 
     def delete_actor(self, actor_id):
-        for i, actor in enumerate(self.data):
-            if actor.get('ID') == actor_id:
+        for i, actor_data in enumerate(self.data):
+            if actor_data.get('ID') == actor_id:
                 del self.data[i]
                 self.save_data()
                 return True
@@ -241,26 +231,26 @@ class Actor_rep_json(ActorRep):
         return self.data
 
 
-class Actor_rep_yaml(Actor_rep_json):
+class ActorRepYaml(ActorRepJson):
     def __init__(self, filename="actors.yaml"):
         super().__init__(filename)
 
     def _load_data(self):
         try:
-            with open(self.filename, 'r', encoding='utf-8') as f:
-                self.data = yaml.safe_load(f) or []
+            with open(self.filename, 'r', encoding='utf-8') as file:
+                self.data = yaml.safe_load(file) or []
         except (FileNotFoundError, yaml.YAMLError):
             self.data = []
 
     def save_data(self):
-        with open(self.filename, 'w', encoding='utf-8') as f:
-            yaml.dump(self.data, f, allow_unicode=True,
+        with open(self.filename, 'w', encoding='utf-8') as file:
+            yaml.dump(self.data, file, allow_unicode=True,
                       default_flow_style=False, sort_keys=False)
 
 
-class Actor_rep_DB(ActorRep):
-    def __init__(self, db_config=None):
-        self.db = Delegat(db_config)
+class ActorRepDB(ActorRep):
+    def __init__(self, db_config_data=None):
+        self.db = Delegat(db_config_data)
 
     def _apply_filters(self, data, filters):
         filtered_data = []
@@ -283,36 +273,29 @@ class Actor_rep_DB(ActorRep):
                             match = False
                 else:
                     match = False
-
                 if not match:
                     break
-
             if match:
                 filtered_data.append(item)
-
         return filtered_data
 
     def _apply_sorting(self, data, sort_by, sort_order='ASC'):
         if not data or sort_by not in data[0]:
             return data
-
-        reverse = (sort_order.upper() == 'DESC')
+        reverse = sort_order.upper() == 'DESC'
         return sorted(data, key=lambda x: x.get(sort_by, ''), reverse=reverse)
 
     def _get_count_with_filters(self, filters):
         where_conditions = []
         params = []
-
         field_mapping = {
             'Стаж': 'staz',
             'Фамилия': 'fam',
             'ID': 'id',
             'ФИО': 'fio'
         }
-
         for field, condition in filters.items():
             db_field = field_mapping.get(field, field)
-
             if isinstance(condition, dict):
                 for op, value in condition.items():
                     if op == 'min':
@@ -330,17 +313,14 @@ class Actor_rep_DB(ActorRep):
             else:
                 where_conditions.append(f"{db_field} = %s")
                 params.append(condition)
-
         where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
         query = f"SELECT COUNT(*) FROM actors WHERE {where_clause}"
-
         result = self.db.execute_query(query, params)
         return result[0][0] if result else 0
 
     def get_by_id(self, actor_id):
         query = "SELECT id, fam, staz, fio, zvan, awards FROM actors WHERE id = %s"
         result = self.db.execute_query(query, (actor_id,))
-
         if result and len(result) > 0:
             row = result[0]
             return {
@@ -363,7 +343,7 @@ class Actor_rep_DB(ActorRep):
 
     def add_actor(self, actor_data):
         query = """
-        INSERT INTO actors (fam, staz, fio, zvan, awards) 
+        INSERT INTO actors (fam, staz, fio, zvan, awards)
         VALUES (%s, %s, %s, %s, %s) RETURNING id
         """
         new_id = self.db.execute_insert_returning(query, (
@@ -374,7 +354,7 @@ class Actor_rep_DB(ActorRep):
 
     def update_actor(self, actor_id, new_data):
         query = """
-        UPDATE actors SET fam = %s, staz = %s, fio = %s, zvan = %s, awards = %s 
+        UPDATE actors SET fam = %s, staz = %s, fio = %s, zvan = %s, awards = %s
         WHERE id = %s
         """
         rows_affected = self.db.execute_command(query, (
@@ -399,8 +379,9 @@ class Actor_rep_DB(ActorRep):
 
 
 class Adapter(ActorRep):
-    def __init__(self, db_repo):
-        self._db_repo = db_repo
+    def __init__(self, db_repo_instance):
+        self._db_repo = db_repo_instance
+
     def _apply_filters(self, data, filters):
         return self._db_repo._apply_filters(data, filters)
 
@@ -441,7 +422,6 @@ class ActorShort:
             actor_id = data['ID']
             fam = data['Фамилия']
             staz = data['Стаж']
-
         self.__validate_actor_id(actor_id)
         self.__actor_id = actor_id
         self.__validate_fam(fam)
@@ -457,8 +437,8 @@ class ActorShort:
                 if field not in data:
                     raise ValueError("Отсутствуют необходимые поля")
             return data
-        except json.JSONDecodeError:
-            raise ValueError("Некорректный JSON формат")
+        except json.JSONDecodeError as e:
+            raise ValueError("Некорректный JSON формат") from e
 
     def __eq__(self, other):
         if not isinstance(other, ActorShort):
@@ -514,7 +494,6 @@ class Actor(ActorShort):
             fio = data['ФИО']
             zvan = data.get('Звание', [])
             awards = data.get('Награды', [])
-
         self.__validate_fam(short_actor.get_fam())
         super().__init__(short_actor.get_actor_id(), short_actor.get_fam(), short_actor.get_staz())
         self.__validate_fio(fio)
@@ -530,8 +509,8 @@ class Actor(ActorShort):
                 if field not in data:
                     raise ValueError(f"Отсутствует поле {field} в JSON")
             return data
-        except json.JSONDecodeError:
-            raise ValueError("Некорректный JSON формат")
+        except json.JSONDecodeError as e:
+            raise ValueError("Некорректный JSON формат") from e
 
     def __eq__(self, other):
         if not isinstance(other, Actor):
@@ -588,7 +567,7 @@ class Actor(ActorShort):
                 json_data.get('Награды', [])
             )
         except KeyError as e:
-            raise ValueError(f"Отсутствует обязательное поле в JSON: {e}")
+            raise ValueError(f"Отсутствует обязательное поле в JSON: {e}") from e
 
     @classmethod
     def from_string(cls, string_data):
@@ -596,14 +575,13 @@ class Actor(ActorShort):
             try:
                 json_data = json.loads(string_data)
                 return cls.from_json(json_data)
-            except json.JSONDecodeError:
-                raise ValueError("Некорректный JSON формат")
+            except json.JSONDecodeError as e:
+                raise ValueError("Некорректный JSON формат") from e
         else:
             try:
                 parts = string_data.split(',')
                 if len(parts) < 3:
                     raise ValueError("Строка должна содержать минимум 3 поля: ID, ФИО, Стаж")
-
                 actor_id = int(parts[0])
                 fio = parts[1].strip()
                 staz = float(parts[2])
@@ -615,9 +593,8 @@ class Actor(ActorShort):
                 if len(parts) > 4 and parts[4].strip():
                     awards = parts[4].split(';')
                 return cls(short_actor, fio, zvan, awards)
-
             except ValueError as e:
-                raise ValueError(f"Ошибка парсинга CSV строки: {e}")
+                raise ValueError(f"Ошибка парсинга CSV строки: {e}") from e
 
     @staticmethod
     def __only_fam(fio):
@@ -669,13 +646,13 @@ if __name__ == "__main__":
         {"ID": 3, "Фамилия": "Сидоров", "Стаж": 25, "ФИО": "Сидоров Алексей Владимирович"}
     ]
 
-    with open("test_actors.json", "w", encoding="utf-8") as f:
-        json.dump(test_actors, f, ensure_ascii=False, indent=2)
-    with open("test_actors.yaml", "w", encoding="utf-8") as f:
-        yaml.dump(test_actors, f, allow_unicode=True, default_flow_style=False)
+    with open("test_actors.json", "w", encoding="utf-8") as file:
+        json.dump(test_actors, file, ensure_ascii=False, indent=2)
+    with open("test_actors.yaml", "w", encoding="utf-8") as file:
+        yaml.dump(test_actors, file, allow_unicode=True, default_flow_style=False)
 
     print("JSON:")
-    json_repo = Actor_rep_json("test_actors.json")
+    json_repo = ActorRepJson("test_actors.json")
     print("Актеры со стажем > 10 лет:")
     experienced = json_repo.get_k_n_short_list(10, 1, filters={'Стаж': {'min': 10}})
     for actor in experienced:
@@ -687,7 +664,7 @@ if __name__ == "__main__":
         print(f" - {actor['Фамилия']} (стаж: {actor['Стаж']} лет)")
 
     print("\nYAML:")
-    yaml_repo = Actor_rep_yaml("test_actors.yaml")
+    yaml_repo = ActorRepYaml("test_actors.yaml")
     print("Актеры с фамилией на 'ов':")
     filtered = yaml_repo.get_k_n_short_list(10, 1, filters={'Фамилия': {'contains': 'ов'}})
     for actor in filtered:
@@ -701,7 +678,7 @@ if __name__ == "__main__":
         'port': 5432
     }
     try:
-        db_repo = Actor_rep_DB(db_config)
+        db_repo = ActorRepDB(db_config)
         adapted_repo = Adapter(db_repo)
 
         print("\nБД:")
@@ -710,8 +687,9 @@ if __name__ == "__main__":
         print(f"Всего актеров в БД: {total_count}")
         print(f"Актеров с опытом >= 20 лет: {experienced_count}")
         print("Актеры из БД с фильтрацией стажа от 18 лет:")
-        actors = adapted_repo.get_k_n_short_list(10, 1, filters={'Стаж': {'min': 18}}, sort_by='Стаж',
-                                                 sort_order='DESC')
+        actors = adapted_repo.get_k_n_short_list(
+            10, 1, filters={'Стаж': {'min': 18}}, sort_by='Стаж', sort_order='DESC'
+        )
         for actor in actors:
             print(f" - {actor['Фамилия']} (стаж: {actor['Стаж']} лет)")
         adapted_repo.close_connection()
