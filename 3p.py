@@ -3,9 +3,11 @@ import json
 import yaml
 from abc import ABC, abstractmethod
 
+
 class Delegat:
     _instance = None
     _connection = None
+
     def __new__(cls, db_config=None):
         if cls._instance is None:
             cls._instance = super(Delegat, cls).__new__(cls)
@@ -39,6 +41,7 @@ class Delegat:
         try:
             if not self._connection:
                 raise Exception("Нет подключения к БД")
+
             with self._connection.cursor() as cursor:
                 cursor.execute(query, params or ())
                 self._connection.commit()
@@ -63,6 +66,7 @@ class Delegat:
             self._connection.close()
             self._connection = None
             Delegat._instance = None
+
 
 class ActorRep(ABC):
 
@@ -90,92 +94,6 @@ class ActorRep(ABC):
     def get_count(self):
         pass
 
-class Actor_rep_DB(ActorRep):
-
-    def __init__(self, db_config=None):
-        self.db = Delegat(db_config)
-    def get_by_id(self, actor_id):
-        query = """
-        SELECT id, fam, staz, fio, zvan, awards 
-        FROM actors 
-        WHERE id = %s
-        """
-        result = self.db.execute_query(query, (actor_id,))  
-        if result and len(result) > 0:
-            row = result[0]
-            return {
-                'ID': row[0],
-                'Фамилия': row[1],
-                'Стаж': row[2],
-                'ФИО': row[3],
-                'Звание': row[4] or [],
-                'Награды': row[5] or []
-            }
-        return None
-
-    def get_k_n_short_list(self, k, n):
-        offset = (n - 1) * k
-        query = """
-        SELECT id, fam, staz 
-        FROM actors 
-        ORDER BY id 
-        LIMIT %s OFFSET %s
-        """
-        result = self.db.execute_query(query, (k, offset))  
-        short_list = []
-        if result:
-            for row in result:
-                short_actor = {
-                    'ID': row[0],
-                    'Фамилия': row[1],
-                    'Стаж': row[2]
-                }
-                short_list.append(short_actor)
-        return short_list
-
-    def add_actor(self, actor_data):
-        query = """
-        INSERT INTO actors (fam, staz, fio, zvan, awards) 
-        VALUES (%s, %s, %s, %s, %s) 
-        RETURNING id
-        """
-        new_id = self.db.execute_insert_returning(query, (  
-            actor_data['Фамилия'],
-            actor_data['Стаж'],
-            actor_data['ФИО'],
-            actor_data.get('Звание', []),
-            actor_data.get('Награды', [])
-        ))
-        return new_id
-
-    def update_actor(self, actor_id, new_data):
-        query = """
-        UPDATE actors 
-        SET fam = %s, staz = %s, fio = %s, zvan = %s, awards = %s 
-        WHERE id = %s
-        """
-        rows_affected = self.db.execute_command(query, ( 
-            new_data['Фамилия'],
-            new_data['Стаж'],
-            new_data['ФИО'],
-            new_data.get('Звание', []),
-            new_data.get('Награды', []),
-            actor_id
-        ))
-        return rows_affected > 0 if rows_affected else False
-
-    def delete_actor(self, actor_id):
-        query = "DELETE FROM actors WHERE id = %s"
-        rows_affected = self.db.execute_command(query, (actor_id,))  
-        return rows_affected > 0 if rows_affected else False
-
-    def get_count(self):
-        query = "SELECT COUNT(*) FROM actors"
-        result = self.db.execute_query(query)  
-        return result[0][0] if result else 0
-
-    def close_connection(self):
-        self.db.close_connection()  
 
 class Actor_rep_json(ActorRep):
     def __init__(self, filename="actors.json"):
@@ -245,6 +163,12 @@ class Actor_rep_json(ActorRep):
     def get_count(self):
         return len(self.data)
 
+    def sort_by_experience(self, reverse=False):
+        self.data.sort(key=lambda x: x.get('Стаж', 0), reverse=reverse)
+        self.save_data()
+        return self.data
+
+
 class Actor_rep_yaml(Actor_rep_json):
     def __init__(self, filename="actors.yaml"):
         super().__init__(filename)
@@ -260,6 +184,97 @@ class Actor_rep_yaml(Actor_rep_json):
         with open(self.filename, 'w', encoding='utf-8') as f:
             yaml.dump(self.data, f, allow_unicode=True,
                       default_flow_style=False, sort_keys=False)
+
+
+
+class Actor_rep_DB(ActorRep):
+    def __init__(self, db_config=None):
+        self.db = Delegat(db_config)
+
+    def get_by_id(self, actor_id):
+        query = "SELECT id, fam, staz, fio, zvan, awards FROM actors WHERE id = %s"
+        result = self.db.execute_query(query, (actor_id,))
+
+        if result and len(result) > 0:
+            row = result[0]
+            return {
+                'ID': row[0], 'Фамилия': row[1], 'Стаж': row[2],
+                'ФИО': row[3], 'Звание': row[4] or [], 'Награды': row[5] or []
+            }
+        return None
+
+    def get_k_n_short_list(self, k, n):
+        offset = (n - 1) * k
+        query = "SELECT id, fam, staz FROM actors ORDER BY id LIMIT %s OFFSET %s"
+        result = self.db.execute_query(query, (k, offset))
+        short_list = []
+        if result:
+            for row in result:
+                short_actor = {'ID': row[0], 'Фамилия': row[1], 'Стаж': row[2]}
+                short_list.append(short_actor)
+        return short_list
+
+    def add_actor(self, actor_data):
+        query = """
+        INSERT INTO actors (fam, staz, fio, zvan, awards) 
+        VALUES (%s, %s, %s, %s, %s) RETURNING id
+        """
+        new_id = self.db.execute_insert_returning(query, (
+            actor_data['Фамилия'], actor_data['Стаж'], actor_data['ФИО'],
+            actor_data.get('Звание', []), actor_data.get('Награды', [])
+        ))
+        return new_id
+
+    def update_actor(self, actor_id, new_data):
+        query = """
+        UPDATE actors SET fam = %s, staz = %s, fio = %s, zvan = %s, awards = %s 
+        WHERE id = %s
+        """
+        rows_affected = self.db.execute_command(query, (
+            new_data['Фамилия'], new_data['Стаж'], new_data['ФИО'],
+            new_data.get('Звание', []), new_data.get('Награды', []), actor_id
+        ))
+        return rows_affected > 0
+
+    def delete_actor(self, actor_id):
+        query = "DELETE FROM actors WHERE id = %s"
+        rows_affected = self.db.execute_command(query, (actor_id,))
+        return rows_affected > 0
+
+    def get_count(self):
+        query = "SELECT COUNT(*) FROM actors"
+        result = self.db.execute_query(query)
+        return result[0][0] if result else 0
+
+    def close_connection(self):
+        self.db.close_connection()
+
+
+class Adapter(ActorRep):
+
+    def __init__(self, db_repo):
+        self._db_repo = db_repo
+
+    def get_by_id(self, actor_id):
+        return self._db_repo.get_by_id(actor_id)
+
+    def get_k_n_short_list(self, k, n):
+        return self._db_repo.get_k_n_short_list(k, n)
+
+    def add_actor(self, actor_data):
+        return self._db_repo.add_actor(actor_data)
+
+    def update_actor(self, actor_id, new_data):
+        return self._db_repo.update_actor(actor_id, new_data)
+
+    def delete_actor(self, actor_id):
+        return self._db_repo.delete_actor(actor_id)
+
+    def get_count(self):
+        return self._db_repo.get_count()
+
+    def close_connection(self):
+        return self._db_repo.close_connection()
 
 class ActorShort:
     def __init__(self, actor_id, fam=None, staz=None):
@@ -489,7 +504,6 @@ class Actor(ActorShort):
 
 
 if __name__ == "__main__":
-
     db_config = {
         'host': 'localhost',
         'database': 'actors',
@@ -498,27 +512,32 @@ if __name__ == "__main__":
         'port': 5432
     }
 
-    db_repo1 = Actor_rep_DB(db_config)
-    db_repo2 = Actor_rep_DB()
-
-    print(f"Это один и тот же объект Delegat: {db_repo1.db is db_repo2.db}")
+    json_repo = Actor_rep_json("test_actors.json")
+    yaml_repo = Actor_rep_yaml("test_actors.yaml")
+    db_repo = Actor_rep_DB(db_config)
+    adapted_repo = Adapter(db_repo)
 
     test_actor = {
         'Фамилия': 'Круз',
         'Стаж': 20,
         'ФИО': 'Круз Том Сергеевич',
         'Звание': ['Заслуженный артист РФ'],
-        'Награды': ['Оскар']
+        'Награды': ['Оскар', 'Золотой глобус']
     }
 
-    new_id = db_repo1.add_actor(test_actor)
-    print(f"Добавлен актер с ID: {new_id}")
+    json_id = json_repo.add_actor(test_actor.copy())
+    yaml_id = yaml_repo.add_actor(test_actor.copy())
+    db_id = adapted_repo.add_actor(test_actor.copy())
 
-    actor = db_repo1.get_by_id(new_id)
-    print(f"Актер с ID {new_id}: {actor['ФИО']}")
-    print(actor)
 
-    count = db_repo1.get_count()
-    print(f"Общее количество актеров: {count}")
+    repositories = [
+        ("JSON репозиторий", json_repo, json_id),
+        ("YAML репозиторий", yaml_repo, yaml_id),
+        ("БД через адаптер", adapted_repo, db_id)
+    ]
 
-    db_repo1.close_connection()
+    for repo_name, repo, actor_id in repositories:
+        actor = repo.get_by_id(actor_id)
+        print(f"{repo_name}: {actor}")
+
+    adapted_repo.close_connection()
