@@ -1,8 +1,183 @@
 import psycopg2
 import json
 import yaml
+from abc import ABC, abstractmethod
 
-class Actor_rep_json:
+class Delegat:
+    _instance = None
+    _connection = None
+    def __new__(cls, db_config=None):
+        if cls._instance is None:
+            cls._instance = super(Delegat, cls).__new__(cls)
+            if db_config:
+                cls._instance._initialize(db_config)
+        return cls._instance
+
+    def _initialize(self, db_config):
+        self.db_config = db_config
+        self._create_connection()
+
+    def _create_connection(self):
+        try:
+            self._connection = psycopg2.connect(**self.db_config)
+        except Exception as e:
+            print(f"Ошибка подключения к БД: {e}")
+            self._connection = None
+
+    def execute_query(self, query, params=None):
+        try:
+            if not self._connection:
+                raise Exception("Нет подключения к БД")
+            with self._connection.cursor() as cursor:
+                cursor.execute(query, params or ())
+                return cursor.fetchall()
+        except Exception as e:
+            print(f"Ошибка выполнения запроса: {e}")
+            return None
+
+    def execute_command(self, query, params=None):
+        try:
+            if not self._connection:
+                raise Exception("Нет подключения к БД")
+            with self._connection.cursor() as cursor:
+                cursor.execute(query, params or ())
+                self._connection.commit()
+                return cursor.rowcount
+        except Exception as e:
+            print(f"Ошибка выполнения команды: {e}")
+            return None
+
+    def execute_insert_returning(self, query, params):
+        try:
+            with self._connection.cursor() as cursor:
+                cursor.execute(query, params)
+                new_id = cursor.fetchone()[0]
+                self._connection.commit()
+                return new_id
+        except Exception as e:
+            print(f"Ошибка при выполнении INSERT: {e}")
+            return -1
+
+    def close_connection(self):
+        if self._connection:
+            self._connection.close()
+            self._connection = None
+            Delegat._instance = None
+
+class ActorRep(ABC):
+
+    @abstractmethod
+    def get_by_id(self, actor_id):
+        pass
+
+    @abstractmethod
+    def get_k_n_short_list(self, k, n):
+        pass
+
+    @abstractmethod
+    def add_actor(self, actor_data):
+        pass
+
+    @abstractmethod
+    def update_actor(self, actor_id, new_data):
+        pass
+
+    @abstractmethod
+    def delete_actor(self, actor_id):
+        pass
+
+    @abstractmethod
+    def get_count(self):
+        pass
+
+class Actor_rep_DB(ActorRep):
+
+    def __init__(self, db_config=None):
+        self.db = Delegat(db_config)
+    def get_by_id(self, actor_id):
+        query = """
+        SELECT id, fam, staz, fio, zvan, awards 
+        FROM actors 
+        WHERE id = %s
+        """
+        result = self.db.execute_query(query, (actor_id,))  
+        if result and len(result) > 0:
+            row = result[0]
+            return {
+                'ID': row[0],
+                'Фамилия': row[1],
+                'Стаж': row[2],
+                'ФИО': row[3],
+                'Звание': row[4] or [],
+                'Награды': row[5] or []
+            }
+        return None
+
+    def get_k_n_short_list(self, k, n):
+        offset = (n - 1) * k
+        query = """
+        SELECT id, fam, staz 
+        FROM actors 
+        ORDER BY id 
+        LIMIT %s OFFSET %s
+        """
+        result = self.db.execute_query(query, (k, offset))  
+        short_list = []
+        if result:
+            for row in result:
+                short_actor = {
+                    'ID': row[0],
+                    'Фамилия': row[1],
+                    'Стаж': row[2]
+                }
+                short_list.append(short_actor)
+        return short_list
+
+    def add_actor(self, actor_data):
+        query = """
+        INSERT INTO actors (fam, staz, fio, zvan, awards) 
+        VALUES (%s, %s, %s, %s, %s) 
+        RETURNING id
+        """
+        new_id = self.db.execute_insert_returning(query, (  
+            actor_data['Фамилия'],
+            actor_data['Стаж'],
+            actor_data['ФИО'],
+            actor_data.get('Звание', []),
+            actor_data.get('Награды', [])
+        ))
+        return new_id
+
+    def update_actor(self, actor_id, new_data):
+        query = """
+        UPDATE actors 
+        SET fam = %s, staz = %s, fio = %s, zvan = %s, awards = %s 
+        WHERE id = %s
+        """
+        rows_affected = self.db.execute_command(query, ( 
+            new_data['Фамилия'],
+            new_data['Стаж'],
+            new_data['ФИО'],
+            new_data.get('Звание', []),
+            new_data.get('Награды', []),
+            actor_id
+        ))
+        return rows_affected > 0 if rows_affected else False
+
+    def delete_actor(self, actor_id):
+        query = "DELETE FROM actors WHERE id = %s"
+        rows_affected = self.db.execute_command(query, (actor_id,))  
+        return rows_affected > 0 if rows_affected else False
+
+    def get_count(self):
+        query = "SELECT COUNT(*) FROM actors"
+        result = self.db.execute_query(query)  
+        return result[0][0] if result else 0
+
+    def close_connection(self):
+        self.db.close_connection()  
+
+class Actor_rep_json(ActorRep):
     def __init__(self, filename="actors.json"):
         self.filename = filename
         self.data = []
@@ -39,16 +214,6 @@ class Actor_rep_json:
             short_list.append(short_actor)
         return short_list
 
-    def sort_by_field(self, field, reverse=False):
-        if not self.data:
-            return
-
-        if field not in self.data[0]:
-            raise ValueError(f"Поле {field} не существует в данных")
-
-        self.data.sort(key=lambda x: x.get(field, ''), reverse=reverse)
-        self.save_data()
-
     def add_actor(self, actor_data):
         if self.data:
             new_id = max(actor.get('ID', 0) for actor in self.data) + 1
@@ -79,7 +244,6 @@ class Actor_rep_json:
 
     def get_count(self):
         return len(self.data)
-
 
 class Actor_rep_yaml(Actor_rep_json):
     def __init__(self, filename="actors.yaml"):
@@ -166,7 +330,6 @@ class ActorShort:
 
     def to_full(self, fio, zvan=None, awards=None):
         return Actor(self, fio, zvan, awards)
-
 
 class Actor(ActorShort):
     def __init__(self, short_actor, fio=None, zvan=None, awards=None):
@@ -325,144 +488,8 @@ class Actor(ActorShort):
         return f"ID: {self.get_actor_id()}, ФИО: {self.__fio}, Стаж (лет): {self.get_staz()}, Звания: {self.__zvan}, Награды: {self.__awards}"
 
 
-class Actor_rep_DB:
-    _instance = None
-    _connection = None
-
-    def __new__(cls, db_config=None):
-        if cls._instance is None:
-            cls._instance = super(Actor_rep_DB, cls).__new__(cls)
-            if db_config:
-                cls._instance._initialize(db_config)
-        return cls._instance
-
-    def _initialize(self, db_config):
-        self.db_config = db_config
-        self._create_connection()
-
-    def _create_connection(self):
-        try:
-            self._connection = psycopg2.connect(**self.db_config)
-        except Exception as e:
-            print(f"Ошибка подключения к БД: {e}")
-            self._connection = None
-
-    def _execute_query(self, query, params=None):
-        try:
-            if not self._connection:
-                raise Exception("Нет подключения к БД")
-
-            with self._connection.cursor() as cursor:
-                cursor.execute(query, params or ())
-                if query.strip().upper().startswith('SELECT'):
-                    return cursor.fetchall()
-                else:
-                    self._connection.commit()
-                    return cursor.rowcount
-        except Exception as e:
-            print(f"Ошибка выполнения запроса: {e}")
-            return None
-
-    def _execute_insert_returning(self, query, params):
-        try:
-            with self._connection.cursor() as cursor:
-                cursor.execute(query, params)
-                new_id = cursor.fetchone()[0]
-                self._connection.commit()
-                return new_id
-        except Exception as e:
-            print(f"Ошибка при выполнении INSERT: {e}")
-            return -1
-
-    def get_by_id(self, actor_id):
-        query = """
-        SELECT id, fam, staz, fio, zvan, awards 
-        FROM actors 
-        WHERE id = %s
-        """
-        result = self._execute_query(query, (actor_id,))  
-
-        if result and len(result) > 0:
-            row = result[0]
-            return {
-                'ID': row[0],
-                'Фамилия': row[1],
-                'Стаж': row[2],
-                'ФИО': row[3],
-                'Звание': row[4] or [],
-                'Награды': row[5] or []
-            }
-        return None
-
-    def get_k_n_short_list(self, k, n):
-        offset = (n - 1) * k
-        query = """
-        SELECT id, fam, staz 
-        FROM actors 
-        ORDER BY id 
-        LIMIT %s OFFSET %s
-        """
-        result = self._execute_query(query, (k, offset))  
-        short_list = []
-        if result:
-            for row in result:
-                short_actor = {
-                    'ID': row[0],
-                    'Фамилия': row[1],
-                    'Стаж': row[2]
-                }
-                short_list.append(short_actor)
-
-        return short_list
-
-    def add_actor(self, actor_data):
-        query = """
-        INSERT INTO actors (fam, staz, fio, zvan, awards) 
-        VALUES (%s, %s, %s, %s, %s) 
-        RETURNING id
-        """
-        new_id = self._execute_insert_returning(query, ( 
-            actor_data['Фамилия'],
-            actor_data['Стаж'],
-            actor_data['ФИО'],
-            actor_data.get('Звание', []),
-            actor_data.get('Награды', [])
-        ))
-        return new_id
-
-    def update_actor(self, actor_id, new_data):
-        query = """
-        UPDATE actors 
-        SET fam = %s, staz = %s, fio = %s, zvan = %s, awards = %s 
-        WHERE id = %s
-        """
-        rows_affected = self._execute_query(query, ( 
-            new_data['Фамилия'],
-            new_data['Стаж'],
-            new_data['ФИО'],
-            new_data.get('Звание', []),
-            new_data.get('Награды', []),
-            actor_id
-        ))
-        return rows_affected > 0 if rows_affected else False
-
-    def delete_actor(self, actor_id):
-        query = "DELETE FROM actors WHERE id = %s"
-        rows_affected = self._execute_query(query, (actor_id,))
-        return rows_affected > 0 if rows_affected else False
-
-    def get_count(self):
-        query = "SELECT COUNT(*) FROM actors"
-        result = self._execute_query(query) 
-        return result[0][0] if result else 0
-
-    def close_connection(self):
-        if self._connection:
-            self._connection.close()
-            self._connection = None
-            self._instance = None
-
 if __name__ == "__main__":
+
     db_config = {
         'host': 'localhost',
         'database': 'actors',
@@ -474,7 +501,7 @@ if __name__ == "__main__":
     db_repo1 = Actor_rep_DB(db_config)
     db_repo2 = Actor_rep_DB()
 
-    print(f"Это один и тот же объект: {db_repo1 is db_repo2}")
+    print(f"Это один и тот же объект Delegat: {db_repo1.db is db_repo2.db}")
 
     test_actor = {
         'Фамилия': 'Круз',
@@ -486,20 +513,12 @@ if __name__ == "__main__":
 
     new_id = db_repo1.add_actor(test_actor)
     print(f"Добавлен актер с ID: {new_id}")
+
     actor = db_repo1.get_by_id(new_id)
     print(f"Актер с ID {new_id}: {actor['ФИО']}")
-    short_list = db_repo1.get_k_n_short_list(4, 2)
-    for actor in short_list:
-        print(f"ID: {actor['ID']}, Фамилия: {actor['Фамилия']}, Стаж: {actor['Стаж']}")
+    print(actor)
 
     count = db_repo1.get_count()
     print(f"Общее количество актеров: {count}")
-    updated_data = test_actor.copy()
-    updated_data['Стаж'] = 21
-    updated = db_repo1.update_actor(new_id, updated_data)
-    print(f"Актер с ID {new_id} обновлен: {updated}")
-
-    deleted = db_repo1.delete_actor(new_id)
-    print(f"Актер с ID {new_id} удален: {deleted}")
 
     db_repo1.close_connection()
