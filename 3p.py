@@ -4,6 +4,36 @@ import yaml
 from abc import ABC, abstractmethod
 from functools import wraps
 
+def filterable(original_method):
+
+    @wraps(original_method)
+    def wrapper(self, *args, **kwargs):
+        filters = kwargs.pop('filters', {})
+        sort_by = kwargs.pop('sort_by', None)
+        sort_order = kwargs.pop('sort_order', 'ASC')
+        result = original_method(self, *args, **kwargs)
+        if filters and result:
+            result = self._apply_filters(result, filters)
+        if sort_by and result:
+            result = self._apply_sorting(result, sort_by, sort_order)
+
+        return result
+
+    return wrapper
+
+def countable(original_method):
+
+    @wraps(original_method)
+    def wrapper(self, *args, **kwargs):
+        filters = kwargs.pop('filters', {})
+
+        if filters:
+            return self._get_count_with_filters(filters)
+        else:
+            return original_method(self, *args, **kwargs)
+
+    return wrapper
+
 class Delegat:
     _instance = None
     _connection = None
@@ -112,13 +142,54 @@ class Actor_rep_json(ActorRep):
         with open(self.filename, 'w', encoding='utf-8') as f:
             json.dump(self.data, f, ensure_ascii=False, indent=2)
 
+    def _apply_filters(self, data, filters):
+        filtered_data = []
+        for item in data:
+            match = True
+            for field, condition in filters.items():
+                if field in item:
+                    if isinstance(condition, dict):
+                        for op, value in condition.items():
+                            if op == 'min' and item[field] < value:
+                                match = False
+                            elif op == 'max' and item[field] > value:
+                                match = False
+                            elif op == 'contains' and value not in str(item[field]):
+                                match = False
+                            elif op == 'equals' and item[field] != value:
+                                match = False
+                    else:
+                        if item[field] != condition:
+                            match = False
+                else:
+                    match = False
+
+                if not match:
+                    break
+
+            if match:
+                filtered_data.append(item)
+        return filtered_data
+
+    def _apply_sorting(self, data, sort_by, sort_order='ASC'):
+        if not data or sort_by not in data[0]:
+            return data
+
+        reverse = (sort_order.upper() == 'DESC')
+        return sorted(data, key=lambda x: x.get(sort_by, ''), reverse=reverse)
+
+    def _get_count_with_filters(self, filters):
+        filtered_data = self._apply_filters(self.data, filters)
+        return len(filtered_data)
+
     def get_by_id(self, actor_id):
         for actor in self.data:
             if actor.get('ID') == actor_id:
                 return actor
         return None
 
-    def get_k_n_short_list(self, k, n):
+    @filterable
+    def get_k_n_short_list(self, k, n, **kwargs):
         start_index = (n - 1) * k
         end_index = start_index + k
 
@@ -160,7 +231,8 @@ class Actor_rep_json(ActorRep):
                 return True
         return False
 
-    def get_count(self):
+    @countable
+    def get_count(self, **kwargs):
         return len(self.data)
 
     def sort_by_experience(self, reverse=False):
@@ -185,41 +257,6 @@ class Actor_rep_yaml(Actor_rep_json):
             yaml.dump(self.data, f, allow_unicode=True,
                       default_flow_style=False, sort_keys=False)
 
-
-def apply_filters_and_sort(original_method):
-
-    @wraps(original_method)
-    def wrapper(self, *args, **kwargs):
-
-        filters = kwargs.pop('filters', {})
-        sort_by = kwargs.pop('sort_by', None)
-        sort_order = kwargs.pop('sort_order', 'ASC')
-
-        result = original_method(self, *args, **kwargs)
-
-        if filters and result:
-            result = self._apply_filters(result, filters)
-
-        if sort_by and result:
-            result = self._apply_sorting(result, sort_by, sort_order)
-
-        return result
-
-    return wrapper
-
-
-def count_with_filters(original_method):
-
-    @wraps(original_method)
-    def wrapper(self, *args, **kwargs):
-        filters = kwargs.pop('filters', {})
-
-        if filters:
-            return self._get_count_with_filters(filters)
-        else:
-            return original_method(self, *args, **kwargs)
-
-    return wrapper
 
 class Actor_rep_DB(ActorRep):
     def __init__(self, db_config=None):
@@ -256,7 +293,6 @@ class Actor_rep_DB(ActorRep):
         return filtered_data
 
     def _apply_sorting(self, data, sort_by, sort_order='ASC'):
-
         if not data or sort_by not in data[0]:
             return data
 
@@ -264,7 +300,6 @@ class Actor_rep_DB(ActorRep):
         return sorted(data, key=lambda x: x.get(sort_by, ''), reverse=reverse)
 
     def _get_count_with_filters(self, filters):
-
         where_conditions = []
         params = []
 
@@ -303,38 +338,26 @@ class Actor_rep_DB(ActorRep):
         return result[0][0] if result else 0
 
     def get_by_id(self, actor_id):
-
         query = "SELECT id, fam, staz, fio, zvan, awards FROM actors WHERE id = %s"
         result = self.db.execute_query(query, (actor_id,))
 
         if result and len(result) > 0:
             row = result[0]
             return {
-                'ID': row[0],
-                'Фамилия': row[1],
-                'Стаж': row[2],
-                'ФИО': row[3],
-                'Звание': row[4] or [],
-                'Награды': row[5] or []
+                'ID': row[0], 'Фамилия': row[1], 'Стаж': row[2],
+                'ФИО': row[3], 'Звание': row[4] or [], 'Награды': row[5] or []
             }
         return None
 
-    @apply_filters_and_sort
+    @filterable
     def get_k_n_short_list(self, k, n, **kwargs):
-
         offset = (n - 1) * k
-
         query = "SELECT id, fam, staz FROM actors ORDER BY id LIMIT %s OFFSET %s"
         result = self.db.execute_query(query, (k, offset))
-
         short_list = []
         if result:
             for row in result:
-                short_actor = {
-                    'ID': row[0],
-                    'Фамилия': row[1],
-                    'Стаж': row[2]
-                }
+                short_actor = {'ID': row[0], 'Фамилия': row[1], 'Стаж': row[2]}
                 short_list.append(short_actor)
         return short_list
 
@@ -344,11 +367,8 @@ class Actor_rep_DB(ActorRep):
         VALUES (%s, %s, %s, %s, %s) RETURNING id
         """
         new_id = self.db.execute_insert_returning(query, (
-            actor_data['Фамилия'],
-            actor_data['Стаж'],
-            actor_data['ФИО'],
-            actor_data.get('Звание', []),
-            actor_data.get('Награды', [])
+            actor_data['Фамилия'], actor_data['Стаж'], actor_data['ФИО'],
+            actor_data.get('Звание', []), actor_data.get('Награды', [])
         ))
         return new_id
 
@@ -358,40 +378,42 @@ class Actor_rep_DB(ActorRep):
         WHERE id = %s
         """
         rows_affected = self.db.execute_command(query, (
-            new_data['Фамилия'],
-            new_data['Стаж'],
-            new_data['ФИО'],
-            new_data.get('Звание', []),
-            new_data.get('Награды', []),
-            actor_id
+            new_data['Фамилия'], new_data['Стаж'], new_data['ФИО'],
+            new_data.get('Звание', []), new_data.get('Награды', []), actor_id
         ))
         return rows_affected > 0
 
     def delete_actor(self, actor_id):
-
         query = "DELETE FROM actors WHERE id = %s"
         rows_affected = self.db.execute_command(query, (actor_id,))
         return rows_affected > 0
 
-    @count_with_filters
+    @countable
     def get_count(self, **kwargs):
-
         query = "SELECT COUNT(*) FROM actors"
         result = self.db.execute_query(query)
         return result[0][0] if result else 0
 
     def close_connection(self):
-
         self.db.close_connection()
 
 
 class Adapter(ActorRep):
     def __init__(self, db_repo):
         self._db_repo = db_repo
+    def _apply_filters(self, data, filters):
+        return self._db_repo._apply_filters(data, filters)
+
+    def _apply_sorting(self, data, sort_by, sort_order):
+        return self._db_repo._apply_sorting(data, sort_by, sort_order)
+
+    def _get_count_with_filters(self, filters):
+        return self._db_repo._get_count_with_filters(filters)
 
     def get_by_id(self, actor_id):
         return self._db_repo.get_by_id(actor_id)
 
+    @filterable
     def get_k_n_short_list(self, k, n, **kwargs):
         return self._db_repo.get_k_n_short_list(k, n, **kwargs)
 
@@ -404,11 +426,13 @@ class Adapter(ActorRep):
     def delete_actor(self, actor_id):
         return self._db_repo.delete_actor(actor_id)
 
+    @countable
     def get_count(self, **kwargs):
         return self._db_repo.get_count(**kwargs)
 
     def close_connection(self):
         return self._db_repo.close_connection()
+
 
 class ActorShort:
     def __init__(self, actor_id, fam=None, staz=None):
@@ -479,6 +503,7 @@ class ActorShort:
 
     def to_full(self, fio, zvan=None, awards=None):
         return Actor(self, fio, zvan, awards)
+
 
 class Actor(ActorShort):
     def __init__(self, short_actor, fio=None, zvan=None, awards=None):
@@ -638,6 +663,36 @@ class Actor(ActorShort):
 
 
 if __name__ == "__main__":
+    test_actors = [
+        {"ID": 1, "Фамилия": "Иванов", "Стаж": 5, "ФИО": "Иванов Иван Иванович"},
+        {"ID": 2, "Фамилия": "Петров", "Стаж": 15, "ФИО": "Петров Петр Петрович"},
+        {"ID": 3, "Фамилия": "Сидоров", "Стаж": 25, "ФИО": "Сидоров Алексей Владимирович"}
+    ]
+
+    with open("test_actors.json", "w", encoding="utf-8") as f:
+        json.dump(test_actors, f, ensure_ascii=False, indent=2)
+    with open("test_actors.yaml", "w", encoding="utf-8") as f:
+        yaml.dump(test_actors, f, allow_unicode=True, default_flow_style=False)
+
+    print("JSON:")
+    json_repo = Actor_rep_json("test_actors.json")
+    print("Актеры со стажем > 10 лет:")
+    experienced = json_repo.get_k_n_short_list(10, 1, filters={'Стаж': {'min': 10}})
+    for actor in experienced:
+        print(f" - {actor['Фамилия']} (стаж: {actor['Стаж']} лет)")
+    print(f"Количество актеров со стажем > 10 лет: {json_repo.get_count(filters={'Стаж': {'min': 10}})}")
+    print("Сортировка:")
+    sorted_actors = json_repo.get_k_n_short_list(10, 1, sort_by='Стаж', sort_order='DESC')
+    for actor in sorted_actors:
+        print(f" - {actor['Фамилия']} (стаж: {actor['Стаж']} лет)")
+
+    print("\nYAML:")
+    yaml_repo = Actor_rep_yaml("test_actors.yaml")
+    print("Актеры с фамилией на 'ов':")
+    filtered = yaml_repo.get_k_n_short_list(10, 1, filters={'Фамилия': {'contains': 'ов'}})
+    for actor in filtered:
+        print(f" - {actor['Фамилия']}")
+
     db_config = {
         'host': 'localhost',
         'database': 'actors',
@@ -645,17 +700,20 @@ if __name__ == "__main__":
         'password': 'postpass',
         'port': 5432
     }
+    try:
+        db_repo = Actor_rep_DB(db_config)
+        adapted_repo = Adapter(db_repo)
 
-    db_repo = Actor_rep_DB(db_config)
-    total_count = db_repo.get_count()
-    experienced_count = db_repo.get_count(filters={'Стаж': {'min': 20}})
-    print(f"Всего актеров: {total_count}")
-    print(f"Актеров с опытом >= 20 лет: {experienced_count}")
-
-    print("Через адаптер (с фильтрацией):")
-    adapted_repo = Adapter(db_repo)
-    actors = adapted_repo.get_k_n_short_list(10, 1, filters={'Стаж': {'min': 18}})
-    for actor in actors:
-        print(f" - {actor['Фамилия']} (стаж: {actor['Стаж']} лет)")
-
-    db_repo.close_connection()
+        print("\nБД:")
+        total_count = adapted_repo.get_count()
+        experienced_count = adapted_repo.get_count(filters={'Стаж': {'min': 20}})
+        print(f"Всего актеров в БД: {total_count}")
+        print(f"Актеров с опытом >= 20 лет: {experienced_count}")
+        print("Актеры из БД с фильтрацией стажа от 18 лет:")
+        actors = adapted_repo.get_k_n_short_list(10, 1, filters={'Стаж': {'min': 18}}, sort_by='Стаж',
+                                                 sort_order='DESC')
+        for actor in actors:
+            print(f" - {actor['Фамилия']} (стаж: {actor['Стаж']} лет)")
+        adapted_repo.close_connection()
+    except Exception as e:
+        print(f"\nБД недоступна: {e}")
